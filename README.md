@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Edge People-Analytics Pipeline: Technical README
 
 **Audience:** Data Analyst team
@@ -475,3 +476,7 @@ Optional keys: `upload_times_utc` (list of `"HH:MM"`) and `preview_port` (defaul
 | **BLE / iBeacon** | Bluetooth Low Energy tag format worn by staff |
 | **RSSI** | Received signal strength (dBm). Closer to 0 means nearer |
 | **IST** | India Standard Time, UTC+05:30 |
+=======
+# Age-Gender_Edge
+The repo has codes for age gender prediction on edge device
+>>>>>>> e308f2b6db564a17a93eefc397ed75f6a3c9d3cd
