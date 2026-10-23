@@ -1,0 +1,7 @@
+{
+  "camera_id": "test-camera",
+  "device_token": "test-token",
+  "org_id": "test-org",
+  "store_id": "test-store",
+  "edge_function_url": "http://127.0.0.1:9"
+}
