@@ -32,6 +32,20 @@ PALETTE = [
     (132, 56, 255), (82, 0, 133), (203, 56, 255), (255, 149, 200), (255, 55, 199),
 ]
 
+# Standard 80-class COCO labels (YOLO order). Used when the model file has no labels of its own.
+COCO80 = [
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
+    "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog",
+    "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
+    "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite",
+    "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle",
+    "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
+    "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant",
+    "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
+    "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
+    "teddy bear", "hair drier", "toothbrush",
+]
+
 # Latest tracked result, replaced as a whole list each update (safe to read from the draw step).
 # Each item: (x1, y1, x2, y2, track_id, conf, label)
 overlay_tracks = []
@@ -209,9 +223,8 @@ if __name__ == "__main__":
             setattr(intrinsics, key, value)
 
     # Defaults
-    if intrinsics.labels is None:
-        with open("assets/coco_labels.txt", "r") as f:
-            intrinsics.labels = f.read().splitlines()
+    if intrinsics.labels is None:  # e.g. the YOLO .rpk files ship without labels
+        intrinsics.labels = COCO80
     intrinsics.update_with_defaults()
 
     if args.print_intrinsics:
