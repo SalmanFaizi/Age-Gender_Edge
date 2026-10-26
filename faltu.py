@@ -1,5 +1,7 @@
 import argparse
 import sys
+import time
+from collections import deque
 from functools import lru_cache
 
 import cv2
@@ -9,6 +11,32 @@ from picamera2.devices import IMX500
 from picamera2.devices.imx500 import NetworkIntrinsics, postprocess_nanodet_detection
 
 last_detections = []
+
+
+class FPSCounter:
+    """Rolling-window FPS counter (averages over the last `window` seconds)."""
+
+    def __init__(self, window=1.0):
+        self.window = window
+        self.stamps = deque()
+        self.fps = 0.0
+
+    def tick(self):
+        now = time.perf_counter()
+        self.stamps.append(now)
+        while self.stamps and now - self.stamps[0] > self.window:
+            self.stamps.popleft()
+        if len(self.stamps) > 1:
+            span = self.stamps[-1] - self.stamps[0]
+            if span > 0:
+                self.fps = (len(self.stamps) - 1) / span
+        return self.fps
+
+
+# Detection FPS: how often the main loop receives + parses a new result (inference rate)
+detect_fps = FPSCounter()
+# Display FPS: how often frames are drawn on the preview (camera/ISP output rate)
+display_fps = FPSCounter()
 
 
 class Detection:
@@ -62,14 +90,29 @@ def get_labels():
     return labels
 
 
+def draw_fps(array):
+    """Draw the FPS counters in the top-left corner of the frame."""
+    lines = [
+        f"Detect FPS: {detect_fps.fps:5.1f}",
+        f"Display FPS: {display_fps.fps:5.1f}",
+    ]
+    y = 25
+    for line in lines:
+        (tw, th), baseline = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+        # Dark background for readability
+        cv2.rectangle(array, (5, y - th - 5), (5 + tw + 10, y + baseline), (0, 0, 0), cv2.FILLED)
+        cv2.putText(array, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        y += th + baseline + 12
+
+
 def draw_detections(request, stream="main"):
     """Draw the detections for this request onto the ISP output."""
+    display_fps.tick()  # count every frame that reaches the preview
+
     detections = last_results
-    if detections is None:
-        return
     labels = get_labels()
     with MappedArray(request, stream) as m:
-        for detection in detections:
+        for detection in detections or []:
             x, y, w, h = detection.box
             label = f"{labels[int(detection.category)]} ({detection.conf:.2f})"
 
@@ -104,6 +147,8 @@ def draw_detections(request, stream="main"):
             color = (255, 0, 0)  # red
             cv2.putText(m.array, "ROI", (b_x + 5, b_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
             cv2.rectangle(m.array, (b_x, b_y), (b_x + b_w, b_y + b_h), (255, 0, 0, 0))
+
+        draw_fps(m.array)
 
 
 def get_args():
@@ -179,3 +224,4 @@ if __name__ == "__main__":
     picam2.pre_callback = draw_detections
     while True:
         last_results = parse_detections(picam2.capture_metadata())
+        detect_fps.tick()  # one tick per result received/parsed from the sensor
