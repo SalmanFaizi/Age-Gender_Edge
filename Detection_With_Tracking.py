@@ -60,6 +60,27 @@ def get_labels():
     return labels
 
 
+_last_debug = 0.0
+
+
+def debug_dump(np_outputs, boxes, scores, classes):
+    """Once a second, print what the sensor really returned, BEFORE any filtering."""
+    global _last_debug
+    now = time.monotonic()
+    if now - _last_debug < 1.0:
+        return
+    _last_debug = now
+    labels = get_labels()
+    top = []
+    for i in np.argsort(-np.asarray(scores, dtype=float))[:5]:
+        c = int(classes[i])
+        top.append((c, labels[c] if 0 <= c < len(labels) else "?", round(float(scores[i]), 2),
+                    [round(float(v), 1) for v in boxes[i]]))
+    print(f"[debug] output shapes={[np.shape(o) for o in np_outputs]} bbox_order={intrinsics.bbox_order} "
+          f"bbox_norm={intrinsics.bbox_normalization} postprocess={intrinsics.postprocess} keep_ids={sorted(keep_ids)}")
+    print(f"[debug] top raw detections (class, label, score, box): {top}")
+
+
 def parse_detections(metadata: dict):
     """Turn the IMX500 output tensors into an sv.Detections in ISP-output pixel coordinates.
 
@@ -84,6 +105,9 @@ def parse_detections(metadata: dict):
             boxes = boxes / input_h
         if intrinsics.bbox_order == "xy":
             boxes = boxes[:, [1, 0, 3, 2]]
+
+    if args.debug:
+        debug_dump(np_outputs, boxes, scores, classes)
 
     xyxy, confs, class_ids = [], [], []
     for box, score, category in zip(boxes, scores, classes):
@@ -198,6 +222,7 @@ def get_args():
     parser.add_argument("--track-buffer", type=int, default=30, help="ByteTrack: frames to keep a lost track alive")
     parser.add_argument("--match-thresh", type=float, default=0.8, help="ByteTrack: matching threshold")
     parser.add_argument("--headless", action="store_true", help="No preview window; print tracks to the console")
+    parser.add_argument("--debug", action="store_true", help="Print raw sensor detections once a second")
     return parser.parse_args()
 
 
