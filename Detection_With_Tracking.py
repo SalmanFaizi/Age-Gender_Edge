@@ -74,6 +74,12 @@ def load_config(path):
     if not isinstance(models.get(model_type), str) or not models[model_type]:
         raise ValueError(f"config is missing models.{model_type}")
 
+    classes = config.get("classes", ["person"])
+    if not isinstance(classes, list) or not classes or any(
+        not isinstance(name, str) or not name for name in classes
+    ):
+        raise ValueError("classes must be a non-empty list of label names")
+
     image_size = config.get("image_size")
     if (
         not isinstance(image_size, list)
@@ -116,6 +122,11 @@ def post_mivolo():
             if job is None:
                 return
             image, box, track_id = job
+            print(
+                f"[mivolo] sending track {track_id}: full-frame JPEG={len(image)} bytes, "
+                f"body_bbox={box}",
+                flush=True,
+            )
             response = requests.post(
                 config["mivolo_api_url"],
                 files={"image": ("frame.jpg", io.BytesIO(image), "image/jpeg")},
@@ -140,25 +151,42 @@ def get_labels():
     return labels
 
 
-_last_debug = 0.0
+_debug_times = {}
 
 
-def debug_dump(np_outputs, boxes, scores, classes):
-    """Once a second, print what the sensor really returned, BEFORE any filtering."""
-    global _last_debug
+def debug_log(key, message, interval=1.0):
     now = time.monotonic()
-    if now - _last_debug < 1.0:
+    if now - _debug_times.get(key, 0.0) < interval:
         return
-    _last_debug = now
+    _debug_times[key] = now
+    print(f"[debug] {message}", flush=True)
+
+
+def debug_dump(np_outputs, boxes, scores, classes, candidates, rejected):
     labels = get_labels()
-    top = []
+    raw_top = []
     for i in np.argsort(-np.asarray(scores, dtype=float))[:5]:
         c = int(classes[i])
-        top.append((c, labels[c] if 0 <= c < len(labels) else "?", round(float(scores[i]), 2),
-                    [round(float(v), 1) for v in boxes[i]]))
-    print(f"[debug] output shapes={[np.shape(o) for o in np_outputs]} bbox_order={intrinsics.bbox_order} "
-          f"bbox_norm={intrinsics.bbox_normalization} postprocess={intrinsics.postprocess} keep_ids={sorted(keep_ids)}")
-    print(f"[debug] top raw detections (class, label, score, box): {top}")
+        raw_top.append(
+            (
+                c,
+                labels[c] if 0 <= c < len(labels) else "?",
+                round(float(scores[i]), 3),
+                [round(float(value), 1) for value in boxes[i]],
+            )
+        )
+    debug_log(
+        "inference",
+        f"sensor output shapes={[np.shape(output) for output in np_outputs]}; "
+        f"bbox_order={intrinsics.bbox_order}, normalized={intrinsics.bbox_normalization}, "
+        f"postprocess={intrinsics.postprocess!r}, threshold={args.threshold:.2f}; "
+        f"top model outputs after bbox order/normalization "
+        f"(class_id, label, score, model_box)={raw_top}; "
+        f"passed score/class filters={len(candidates)} "
+        f"(below_threshold={rejected['threshold']}, unwanted_class={rejected['class']}); "
+        f"camera-frame detections [x1,y1,x2,y2] in {config['image_size']} frame="
+        f"{candidates or 'none'}",
+    )
 
 
 def parse_detections(metadata: dict):
@@ -169,6 +197,8 @@ def parse_detections(metadata: dict):
     """
     np_outputs = imx500.get_outputs(metadata, add_batch=True)
     if np_outputs is None:
+        if args.debug:
+            debug_log("no-output", "no fresh IMX500 inference output on this camera frame")
         return None
 
     input_w, input_h = imx500.get_input_size()
@@ -186,17 +216,33 @@ def parse_detections(metadata: dict):
         if intrinsics.bbox_order == "xy":
             boxes = boxes[:, [1, 0, 3, 2]]
 
-    if args.debug:
-        debug_dump(np_outputs, boxes, scores, classes)
-
     xyxy, confs, class_ids = [], [], []
+    candidates = []
+    rejected = {"threshold": 0, "class": 0}
     for box, score, category in zip(boxes, scores, classes):
-        if score < args.threshold or int(category) not in keep_ids:
+        if score < args.threshold:
+            rejected["threshold"] += 1
+            continue
+        if int(category) not in keep_ids:
+            rejected["class"] += 1
             continue
         x, y, w, h = imx500.convert_inference_coords(box, metadata, picam2)
-        xyxy.append([x, y, x + w, y + h])
-        confs.append(score)
-        class_ids.append(int(category))
+        frame_box = [x, y, x + w, y + h]
+        class_id = int(category)
+        xyxy.append(frame_box)
+        confs.append(float(score))
+        class_ids.append(class_id)
+        candidates.append(
+            (
+                class_id,
+                get_labels()[class_id] if 0 <= class_id < len(get_labels()) else "?",
+                round(float(score), 3),
+                [round(float(value), 1) for value in frame_box],
+            )
+        )
+
+    if args.debug:
+        debug_dump(np_outputs, boxes, scores, classes, candidates, rejected)
 
     if not xyxy:
         return sv.Detections.empty()
@@ -227,6 +273,22 @@ def update_tracks(metadata: dict):
             items.append((int(x1), int(y1), int(x2), int(y2), int(tid), float(conf), labels[int(cls)]))
     valid_items = [item for item in items if point_in_zone(item[:4])]
     overlay_tracks = valid_items
+    if args.debug:
+        excluded = [item for item in items if item not in valid_items]
+        visible = [
+            {
+                "id": item[4],
+                "label": item[6],
+                "confidence": round(item[5], 3),
+                "box": item[:4],
+            }
+            for item in valid_items
+        ]
+        debug_log(
+            "tracking",
+            f"ByteTrack outputs={len(items)}, inside_detection_zone={len(valid_items)}, "
+            f"outside_zone_ids={[item[4] for item in excluded]}; visible tracks={visible or 'none'}",
+        )
 
     now = time.monotonic()
     if stats["t_last"] is not None and now > stats["t_last"]:
@@ -371,12 +433,21 @@ def get_args():
     parser.add_argument("--print-intrinsics", action="store_true", help="Print JSON network_intrinsics then exit")
 
     # Tracking / app options
-    parser.add_argument("--classes", nargs="+", default=["person"], help="Label names to track")
+    parser.add_argument(
+        "--classes",
+        nargs="+",
+        default=None,
+        help="Label names to track (overrides classes in the detection config)",
+    )
     parser.add_argument("--track-thresh", type=float, default=0.4, help="ByteTrack: confidence needed to start/confirm a track")
     parser.add_argument("--track-buffer", type=int, default=30, help="ByteTrack: frames to keep a lost track alive")
     parser.add_argument("--match-thresh", type=float, default=0.8, help="ByteTrack: matching threshold")
     parser.add_argument("--headless", action="store_true", help="No preview window; print tracks to the console")
-    parser.add_argument("--debug", action="store_true", help="Print raw sensor detections once a second")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print model, camera-frame detection, tracking and zone diagnostics",
+    )
     parser.add_argument("--target-frames", type=int, default=20, help="Inference frames collected per track")
     parser.add_argument(
         "--minimum-valid-ratio",
@@ -425,10 +496,26 @@ if __name__ == "__main__":
         print(intrinsics)
         sys.exit(0)
 
+    args.classes = args.classes or config["classes"]
+
     keep_ids = {i for i, name in enumerate(get_labels()) if name in args.classes}
     if not keep_ids:
         print(f"None of {args.classes} found in the model labels", file=sys.stderr)
         sys.exit(1)
+
+    if args.debug:
+        print(
+            f"[debug] startup: model={args.model or config['models'][config['model_type']]!r} "
+            f"model_type={config['model_type']!r}, classes={args.classes}, "
+            f"class_ids={sorted(keep_ids)}, "
+            f"image_size={config['image_size']}, zone={config['detection_zone']['points']}, "
+            f"bbox_order={intrinsics.bbox_order}, normalized={intrinsics.bbox_normalization}, "
+            f"threshold={args.threshold}, track_start_threshold={args.track_thresh}, "
+            f"MiVOLO target={args.target_frames} inference frames, "
+            f"minimum_valid={math.ceil(args.target_frames * args.minimum_valid_ratio)}/"
+            f"{args.target_frames}",
+            flush=True,
+        )
 
     fps = args.fps or intrinsics.inference_rate or 30
     tracker = sv.ByteTrack(

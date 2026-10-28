@@ -471,6 +471,7 @@ separate from `~/retail/config.json`, which belongs to `detector.py`.
     "default": "/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk",
     "yolo": "/usr/share/imx500-models/imx500_network_yolo11n.rpk"
   },
+  "classes": ["person"],
   "image_size": [640, 640],
   "detection_zone": {
     "points": [[0, 0], [640, 0], [640, 640], [0, 640]]
@@ -481,9 +482,11 @@ separate from `~/retail/config.json`, which belongs to `detector.py`.
 ```
 
 Set `model_type` to `default` or `yolo`, edit the corresponding installed model path,
-set the camera output `image_size` as `[width, height]`, and define the allowed zone as
-a polygon in those output-frame pixel coordinates. The IMX500 model's internal input
-dimensions are fixed by its `.rpk` file. Start the FastAPI MiVOLO server separately,
+set `classes` to the detector label names you want to track (for example
+`["person"]` or `["person", "bicycle"]`), set the camera output `image_size` as
+`[width, height]`, and define the allowed zone as a polygon in those output-frame pixel
+coordinates. The `--classes` command-line option overrides the config value. The IMX500
+model's internal input dimensions are fixed by its `.rpk` file. Start the FastAPI MiVOLO server separately,
 then run `python Detection_With_Tracking.py` (or `python Detection_With_Tracking.py
 --config <path>`). The optional `--model` overrides the configured model path.
 

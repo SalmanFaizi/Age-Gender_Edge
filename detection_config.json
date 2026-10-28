@@ -4,6 +4,7 @@
     "default": "/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk",
     "yolo": "/usr/share/imx500-models/imx500_network_yolo11n.rpk"
   },
+  "classes": ["person"],
   "image_size": [640, 640],
   "detection_zone": {
     "points": [[0, 0], [640, 0], [640, 640], [0, 640]]
