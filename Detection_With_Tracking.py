@@ -442,7 +442,7 @@ if __name__ == "__main__":
     mivolo_thread.start()
     picam2 = Picamera2(imx500.camera_num)
     camera_config = picam2.create_preview_configuration(
-        main={"size": tuple(config["image_size"]), "format": "RGB888"},
+        main={"size": tuple(config["image_size"]), "format": "XBGR8888"},
         controls={"FrameRate": fps},
         buffer_count=12,
     )
