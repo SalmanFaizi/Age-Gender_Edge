@@ -3,5 +3,20 @@
   "device_token": "test-token",
   "org_id": "test-org",
   "store_id": "test-store",
-  "edge_function_url": "http://127.0.0.1:9"
+  "edge_function_url": "http://127.0.0.1:9",
+  "pi_inference": {
+    "model_id": "iitolstykh/mivolo_v2",
+    "results_file": "predictions.xlsx",
+    "images_dir": "prediction_images",
+    "num_threads": 2,
+    "max_queue_size": 15,
+    "retention_days": 7,
+    "retention_check_interval_seconds": 3600,
+    "maintenance_db": "mivolo_maintenance.sqlite3",
+    "face_detector": {
+      "model_path": "yolov11n-face.pt",
+      "confidence": 0.25,
+      "image_size": 640
+    }
+  }
 }

@@ -5,10 +5,10 @@
     "yolo": "/usr/share/imx500-models/imx500_network_yolo11n.rpk"
   },
   "classes": ["person"],
-  "image_size": [640, 640],
+  "image_size": [1280, 1280],
   "detection_zone": {
-    "points": [[0, 0], [640, 0], [640, 640], [0, 640]]
+    "points": [[0, 0], [1280, 0], [1280, 1280], [0, 1280]]
   },
-  "mivolo_api_url": "http://100.121.180.28:8000/predict",
+  "mivolo_api_url": "http://0.0.0.0:8000/predict",
   "mivolo_timeout_seconds": 120
 }

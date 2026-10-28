@@ -1,0 +1,16 @@
+[Unit]
+Description=MiVOLO Age and Gender Inference API
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=admin
+WorkingDirectory=/home/admin/my_project
+ExecStart=/home/admin/my_project/.venv/bin/uvicorn pi_inference:app --host 0.0.0.0 --port 8000 --workers 1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

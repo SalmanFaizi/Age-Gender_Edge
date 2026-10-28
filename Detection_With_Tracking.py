@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """IMX500 person detection + ByteTrack (supervision) + bbox / track-ID overlay.
 
-Detection runs on the IMX500 sensor. Tracking and drawing run on the Pi inside the
-camera pre_callback, so the detections, the tracker update and the frame being drawn
-all come from the same request (no lag between boxes and pixels).
+Detection runs on the IMX500 sensor. The camera main stream can be configured at a
+higher resolution than the model's fixed input tensor; IMX500 coordinate conversion
+maps detections into that stream's pixel coordinates. Tracking and drawing run on
+the Pi inside the camera pre_callback, so detections and pixels stay aligned.
 """
 import argparse
 import io
@@ -58,6 +59,7 @@ COCO80 = [
 overlay_tracks = []
 stats = {"fps": 0.0, "t_last": None}
 track_windows = {}
+completed_track_ids = set()
 mivolo_queue = queue.Queue()
 
 
@@ -130,7 +132,7 @@ def post_mivolo():
             response = requests.post(
                 config["mivolo_api_url"],
                 files={"image": ("frame.jpg", io.BytesIO(image), "image/jpeg")},
-                data={"body_bbox": json.dumps(box)},
+                data={"body_bbox": json.dumps(box), "track_id": str(track_id)},
                 timeout=config.get("mivolo_timeout_seconds", 120),
             )
             response.raise_for_status()
@@ -306,14 +308,18 @@ def collect_track_frames(request, items):
     frame_bytes = None
     if items:
         with MappedArray(request, "main") as mapped:
+            # XBGR8888 is exposed as RGBA bytes on the Pi's little-endian CPU.
+            frame_bgr = cv2.cvtColor(mapped.array, cv2.COLOR_RGBA2BGR)
             ok, encoded = cv2.imencode(
-                ".jpg", mapped.array, [cv2.IMWRITE_JPEG_QUALITY, 90]
+                ".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 90]
             )
         if not ok:
             raise RuntimeError("OpenCV failed to encode the full camera frame")
         frame_bytes = encoded.tobytes()
 
     for x1, y1, x2, y2, track_id, confidence, _label in items:
+        if track_id in completed_track_ids:
+            continue
         window = track_windows.get(track_id)
         if window is None:
             window = {
@@ -341,23 +347,28 @@ def collect_track_frames(request, items):
 
     for track_id, window in list(track_windows.items()):
         if window["target_frames"] >= args.target_frames:
-            required = math.ceil(args.target_frames * args.minimum_valid_ratio)
-            if window["valid_frames"] >= required:
-                _area, _confidence, image, box = window["best_sample"]
-                mivolo_queue.put((image, box, track_id))
-                print(
-                    f"[mivolo] queued track {track_id}: "
-                    f"{window['valid_frames']}/{window['target_frames']} valid frames"
-                )
-            else:
-                print(
-                    f"[mivolo] skipped track {track_id}: "
-                    f"{window['valid_frames']}/{window['target_frames']} valid frames "
-                    f"(minimum {required})"
-                )
-            del track_windows[track_id]
+            reason = "target reached"
         elif window["missed_frames"] > args.track_buffer:
-            del track_windows[track_id]
+            reason = "track lost"
+        else:
+            continue
+
+        required = math.ceil(args.target_frames * args.minimum_valid_ratio)
+        if window["valid_frames"] >= required:
+            _area, _confidence, image, box = window["best_sample"]
+            mivolo_queue.put((image, box, track_id))
+            print(
+                f"[mivolo] queued track {track_id} ({reason}): "
+                f"{window['valid_frames']}/{window['target_frames']} valid frames"
+            )
+        else:
+            print(
+                f"[mivolo] skipped track {track_id} ({reason}): "
+                f"{window['valid_frames']}/{window['target_frames']} valid frames "
+                f"(minimum {required})"
+            )
+        completed_track_ids.add(track_id)
+        del track_windows[track_id]
 
 
 def draw(request, stream="main"):
