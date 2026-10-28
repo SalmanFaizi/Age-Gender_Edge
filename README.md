@@ -459,6 +459,43 @@ Optional keys: `upload_times_utc` (list of `"HH:MM"`) and `preview_port` (defaul
 
 **Log levels:** `DEBUG` shows per-frame raw scores (useful for threshold tuning). `INFO` shows detections, model status, a once-a-minute summary (`Active | Visible | Staff | Buffer`) and errors.
 
+### IMX500 tracker and MiVOLO API client
+
+`Detection_With_Tracking.py` uses `detection_config.json` beside the script. It is
+separate from `~/retail/config.json`, which belongs to `detector.py`.
+
+```json
+{
+  "model_type": "yolo",
+  "models": {
+    "default": "/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk",
+    "yolo": "/usr/share/imx500-models/imx500_network_yolo11n.rpk"
+  },
+  "image_size": [640, 640],
+  "detection_zone": {
+    "points": [[0, 0], [640, 0], [640, 640], [0, 640]]
+  },
+  "mivolo_api_url": "http://localhost:8000/predict",
+  "mivolo_timeout_seconds": 120
+}
+```
+
+Set `model_type` to `default` or `yolo`, edit the corresponding installed model path,
+set the camera output `image_size` as `[width, height]`, and define the allowed zone as
+a polygon in those output-frame pixel coordinates. The IMX500 model's internal input
+dimensions are fixed by its `.rpk` file. Start the FastAPI MiVOLO server separately,
+then run `python Detection_With_Tracking.py` (or `python Detection_With_Tracking.py
+--config <path>`). The optional `--model` overrides the configured model path.
+
+For each track, the client counts 20 fresh sensor-inference opportunities. A frame
+counts as valid when the tracked person's center is inside the configured zone. At
+least 30% (6 of 20 by default) must be valid; otherwise the track is discarded without
+an API request. Eligible tracks send exactly one request, using the best-area valid
+sample and its bounding box. The uploaded JPEG is the **full, uncropped camera frame**;
+`body_bbox` contains the person's `[x1, y1, x2, y2]` coordinates in that frame. The
+MiVOLO FastAPI service is responsible for persisting its processed results and embedded
+image to Excel.
+
 ---
 
 ## 15. Glossary

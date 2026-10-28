@@ -1,0 +1,13 @@
+{
+  "model_type": "default",
+  "models": {
+    "default": "/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk",
+    "yolo": "/usr/share/imx500-models/imx500_network_yolo11n.rpk"
+  },
+  "image_size": [640, 640],
+  "detection_zone": {
+    "points": [[0, 0], [640, 0], [640, 640], [0, 640]]
+  },
+  "mivolo_api_url": "http://100.121.180.28:8000/predict",
+  "mivolo_timeout_seconds": 120
+}
